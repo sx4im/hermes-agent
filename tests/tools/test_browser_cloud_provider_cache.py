@@ -219,32 +219,33 @@ class TestCloudProviderCachePolicy:
 
     def test_no_credentials_yet_does_not_cache_none(self, monkeypatch):
         """Auto-detect path with no creds: must NOT poison the cache."""
+        from agent import browser_registry
+        from plugins.browser.browser_use.provider import BrowserUseBrowserProvider
+        from plugins.browser.browserbase.provider import BrowserbaseBrowserProvider
+
         monkeypatch.setattr(
             "hermes_cli.config.read_raw_config",
             lambda: {"browser": {}},
         )
+        # Pin the registry snapshot: auto-detect must consult it, not the
+        # provider classes directly (issue #134152).
+        monkeypatch.setattr("tools.browser_tool_cloud._ensure_browser_plugins_loaded", lambda: None)
+        browser_registry._reset_for_tests()
+        browser_registry.register_provider(BrowserUseBrowserProvider())
+        browser_registry.register_provider(BrowserbaseBrowserProvider())
+        try:
+            assert bt_cloud._get_cloud_provider() is None
+            assert browser_tool._cloud_provider_resolved is False
 
-        bu_unconfigured = Mock()
-        bu_unconfigured.is_available.return_value = False
-        bb_unconfigured = Mock()
-        bb_unconfigured.is_available.return_value = False
-        monkeypatch.setattr(
-            "tools.browser_tool_cloud.BrowserUseBrowserProvider", lambda: bu_unconfigured
-        )
-        monkeypatch.setattr(
-            "tools.browser_tool_cloud.BrowserbaseBrowserProvider", lambda: bb_unconfigured
-        )
+            # Credentials self-heal — next call must retry and pick up the provider.
+            monkeypatch.setenv("BROWSER_USE_API_KEY", "key")
 
-        assert bt_cloud._get_cloud_provider() is None
-        assert browser_tool._cloud_provider_resolved is False
-
-        # Credentials self-heal — next call must retry and pick up the provider.
-        healed = Mock(name="healed-provider")
-        healed.is_available.return_value = True
-        monkeypatch.setattr("tools.browser_tool_cloud.BrowserUseBrowserProvider", lambda: healed)
-
-        assert bt_cloud._get_cloud_provider() is healed
-        assert browser_tool._cloud_provider_resolved is True
+            provider = bt_cloud._get_cloud_provider()
+            assert provider is not None
+            assert provider.name == "browser-use"
+            assert browser_tool._cloud_provider_resolved is True
+        finally:
+            browser_registry._reset_for_tests()
 
 
     def test_explicit_provider_instantiation_failure_does_not_cache(

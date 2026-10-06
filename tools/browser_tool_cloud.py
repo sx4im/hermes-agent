@@ -9,9 +9,8 @@ from typing import Callable, Optional
 
 from agent.browser_provider import BrowserProvider as CloudBrowserProvider
 from agent.browser_registry import get_provider as _registry_get_browser_provider
+from agent.browser_registry import _resolve as _registry_resolve_browser_provider
 from hermes_constants import get_hermes_home_override, hermes_home_key
-from plugins.browser.browser_use.provider import BrowserUseBrowserProvider
-from plugins.browser.browserbase.provider import BrowserbaseBrowserProvider
 from tools.tool_backend_helpers import normalize_browser_cloud_provider
 from utils import is_truthy_value
 from tools.browser_tool_origin import origin_module as _origin
@@ -100,14 +99,15 @@ def _instantiate_explicit_cloud_provider(provider_key: str) -> Optional[CloudBro
 def _autodetect_cloud_provider() -> Optional[CloudBrowserProvider]:
     """Auto-detect: Browser Use, then Browserbase; never raises.
 
-    Third-party plugins are only reachable via explicit ``browser.cloud_provider: <name>``.
+    Resolves through the browser provider registry — the same registry the
+    explicit ``browser.cloud_provider`` path uses — so a plugin in
+    ``plugins.disabled`` (never registered) is not selected. Third-party
+    plugins are only reachable via explicit ``browser.cloud_provider: <name>``.
     """
     _bt = _origin()
     try:
-        for cls in (BrowserUseBrowserProvider, BrowserbaseBrowserProvider):
-            fallback_provider = cls()
-            if fallback_provider.is_available():
-                return fallback_provider
+        _ensure_browser_plugins_loaded()
+        return _registry_resolve_browser_provider(None)
     except Exception:  # pragma: no cover - defensive: never poison cache
         _bt.logger.debug("Cloud provider auto-detect failed", exc_info=True)
     return None
